@@ -1,0 +1,64 @@
+name: Build & Release
+
+on: [push]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: 读取版本号
+        id: ver
+        shell: pwsh
+        run: |
+          $m = [regex]::Match((Get-Content FontScope.csproj -Raw), '<Version>([^<]+)</Version>')
+          if (-not $m.Success) { Write-Error 'FontScope.csproj 中未找到 <Version>'; exit 1 }
+          $v = $m.Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "当前版本：v$v"
+
+      # 对应 publish.bat 选项 [1]：框架依赖版
+      - name: 发布（框架依赖版）
+        run: dotnet publish FontScope.csproj -c Release -r win-x64 --self-contained false -o publish/framework-dependent --nologo
+
+      - name: 打包 zip
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE publish/framework-dependent/LICENSE -Force
+          Compress-Archive -Path publish/framework-dependent/* `
+            -DestinationPath "FontScope-v${{ steps.ver.outputs.version }}-win-x64.zip"
+
+      # 每次 push 都能下载到构建产物
+      - name: 上传构建产物（artifact）
+        uses: actions/upload-artifact@v4
+        with:
+          name: FontScope-v${{ steps.ver.outputs.version }}-win-x64
+          path: FontScope-v${{ steps.ver.outputs.version }}-win-x64.zip
+
+      # 版本号有变化（tag 不存在）才发布 Release
+      - name: 检测版本并发布 Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag 已存在，跳过发布"
+          } else {
+            Write-Host "新版本 $tag，正在发布 Release..."
+            gh release create $tag "FontScope-v$env:VERSION-win-x64.zip" `
+              --title "FontScope v$env:VERSION" `
+              --generate-notes
+          }

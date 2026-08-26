@@ -1,0 +1,19 @@
+# 构建产物
+bin/
+obj/
+publish/
+
+# 运行时生成
+.workbuddy_daynote.tmp
+selftest.txt
+error.log
+folders.txt
+rendercheck*.txt
+rendercheck*.png
+probe.txt
+
+*.stale
+.vs/
+*.user
+*.py
+*.TTC

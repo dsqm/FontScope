@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>FontScope</AssemblyName>
+    <RootNamespace>FontScope</RootNamespace>
+    <!-- 版本号单一来源：改这里即可，「关于」弹窗自动读取程序集版本 -->
+    <Version>0.1</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SkiaSharp 仅剩自检与旧组件使用；主预览改走系统 Direct2D（weasel 同款逻辑，Vortice 绑定） -->
+    <PackageReference Include="SkiaSharp" Version="4.148.0" />
+    <PackageReference Include="Vortice.Direct2D1" Version="2.4.2" />
+    <PackageReference Include="Vortice.Direct3D11" Version="2.4.2" />
+    <PackageReference Include="Vortice.DXGI" Version="2.4.2" />
+  </ItemGroup>
+
+  <!-- 发布时剔除调试符号（libSkiaSharp.pdb 高达 88MB，运行不需要） -->
+  <Target Name="StripSymbolFiles" AfterTargets="Publish">
+    <Delete Files="$(PublishDir)libSkiaSharp.pdb" />
+    <Delete Files="$(PublishDir)FontScope.pdb" />
+  </Target>
+</Project>

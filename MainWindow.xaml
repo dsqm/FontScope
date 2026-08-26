@@ -1,0 +1,287 @@
+<Window x:Class="FontScope.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:FontScope"
+        Title="FontScope — 字符字体查询" Height="800" Width="1280"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- 信息区行文本：只读无边框 TextBox，支持鼠标选择与复制 -->
+        <Style x:Key="SelText" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,-2" />
+            <Setter Property="Padding" Value="0,1" />
+        </Style>
+
+        <!-- 列模板（列的增删由代码按 settings.json 动态组装） -->
+        <DataTemplate x:Key="TplPreview">
+            <local:GlyphPreview Text="{Binding QueryText}" Face="{Binding Face}" FontSize="26" Margin="0,2" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplFont">
+            <StackPanel Orientation="Vertical">
+                <TextBlock Text="{Binding NameDisplay}" FontWeight="Bold" />
+                <TextBlock Text="{Binding SubFamilyDisplay}" Foreground="#777" FontSize="11" />
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate x:Key="TplStyle">
+            <TextBlock Text="{Binding StyleOnly}" Foreground="#555" FontSize="11" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplWeight">
+            <TextBlock Text="{Binding WeightDisplay}" Foreground="#555" FontSize="11" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplFormat">
+            <TextBlock Text="{Binding FormatDisplay}" Foreground="#555" FontSize="11" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplPsName">
+            <TextBlock Text="{Binding PsNameDisplay}" Foreground="#555" FontSize="11"
+                       TextTrimming="CharacterEllipsis" ToolTip="{Binding PsNameDisplay}" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplSource">
+            <TextBlock Text="{Binding SourceOnly}" Foreground="#777" />
+        </DataTemplate>
+        <DataTemplate x:Key="TplFile">
+            <TextBlock Text="{Binding FilePathDisplay}" Foreground="#1565C0" FontSize="11"
+                       Cursor="Hand" TextDecorations="Underline"
+                       TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePathDisplay}"
+                       MouseLeftButtonDown="FilePathCell_Click" />
+        </DataTemplate>
+    </Window.Resources>
+    <DockPanel>
+        <!-- 顶部：查询输入 -->
+        <Border DockPanel.Dock="Top" Padding="10,8" Background="#F5F5F5">
+            <DockPanel>
+                <Button x:Name="QueryButton" DockPanel.Dock="Right" Content="查询" Width="80"
+                        IsDefault="True" Click="Query_Click" Margin="8,0,0,0" Padding="0,4" />
+                <TextBox x:Name="InputBox" FontSize="20" Padding="6,4" VerticalContentAlignment="Center"
+                         ToolTip="输入要查询的字符（可多个，回车查询）" TextChanged="InputBox_TextChanged" />
+            </DockPanel>
+        </Border>
+
+        <!-- 顶部：自定义文件夹管理 -->
+        <Border DockPanel.Dock="Top" Padding="10,4" Background="#FAFAFA" BorderBrush="#DDD" BorderThickness="0,1,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                    <Button x:Name="AddFolderButton" Content="添加文件夹…" Padding="8,2" Click="AddFolder_Click" />
+                    <ToggleButton x:Name="ScopeToggle" Margin="10,0,0,0" Padding="10,2" Click="ScopeToggle_Click">
+                        <TextBlock x:Name="ScopeToggleText" Text="扫描范围" />
+                    </ToggleButton>
+                    <!-- 扫描范围下拉面板：勾选切换来源；Popup 不因内部点击而关闭 -->
+                    <Popup x:Name="ScopePopup" PlacementTarget="{Binding ElementName=ScopeToggle}" Placement="Bottom"
+                           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" Closed="ScopePopup_Closed">
+                        <Border Background="White" BorderBrush="#AAA" BorderThickness="1" Width="440" MaxHeight="380"
+                                Padding="10,6" SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.25" />
+                            </Border.Effect>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl x:Name="ScopeList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3">
+                                                <Grid.Style>
+                                                    <Style TargetType="Grid">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                                <Setter Property="Opacity" Value="0.45" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Grid.Style>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox VerticalAlignment="Center"
+                                                          IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                          Checked="ScopeItem_Changed" Unchecked="ScopeItem_Changed" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="7,0,0,0"
+                                                            VerticalAlignment="Center" ToolTip="{Binding Detail}">
+                                                    <TextBlock Text="{Binding Display}" Foreground="Black" />
+                                                    <TextBlock Text="{Binding Detail}" Foreground="#999" FontSize="11"
+                                                               Margin="8,0,0,0" />
+                                                </StackPanel>
+                                                <Button Grid.Column="2" Content="移除" Padding="6,0" Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{Binding Removable, Converter={StaticResource BoolToVis}}"
+                                                        Click="RemoveRow_Click" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+                    </Popup>
+                </StackPanel>
+                <Grid DockPanel.Dock="Right">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" /> <!-- 透明填充块：吃掉两按钮之间的所有空白 -->
+                        <ColumnDefinition Width="Auto" /> <!-- 关于 -->
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="RescanButton" Content="重新扫描" Padding="8,2" Click="Rescan_Click" />
+                    <Border Grid.Column="1" Background="Transparent" IsHitTestVisible="False" />
+                    <Button x:Name="AboutButton" Grid.Column="2" Content="关于" Padding="8,2"
+                            Margin="6,0,0,0" Click="About_Click" />
+                    <Button x:Name="TogglePaneButton" Grid.Column="3" Content="隐藏预览" Padding="8,2"
+                            Margin="6,0,0,0" Click="TogglePane_Click" />
+                </Grid>
+            </DockPanel>
+        </Border>
+
+        <!-- 底部：状态栏 -->
+        <Border DockPanel.Dock="Bottom" Padding="10,4" Background="#F0F0F0" BorderBrush="#DDD" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="StatusText" Text="正在初始化…" Foreground="#555" />
+        </Border>
+
+        <!-- 主体：左列表 + 右大预览 -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" MinWidth="500" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="RightColumn" Width="2*" MinWidth="340" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 结果列表 -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 二次过滤：对当前查询结果按字体名/文件名筛选 -->
+                <Grid Grid.Row="0" Margin="0,4,4,6">
+                    <TextBox x:Name="FilterBox" Padding="6,3" TextChanged="FilterBox_TextChanged"
+                             ToolTip="按字体名称或文件名过滤当前结果，清空即恢复全部" />
+                    <TextBlock Text="输入字体名称 / 文件名进行二次过滤…" Margin="9,0,0,0"
+                               VerticalAlignment="Center" Foreground="#999" IsHitTestVisible="False"
+                               Visibility="{Binding Text.IsEmpty, ElementName=FilterBox, Converter={StaticResource BoolToVis}}" />
+                </Grid>
+
+                <ListView Grid.Row="1" x:Name="ResultList" SelectionMode="Single" Foreground="Black"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          PreviewMouseWheel="ResultList_PreviewMouseWheel"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling">
+                    <ListView.Resources>
+                        <!-- 压平 Aero2 列头默认的玻璃渐变（悬停发蓝的来源） -->
+                        <Style TargetType="GridViewColumnHeader">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="GridViewColumnHeader">
+                                        <Grid>
+                                            <Border x:Name="HdBd" Background="#FAFAFA"
+                                                    BorderBrush="#DDD" BorderThickness="0,0,1,1">
+                                                <ContentPresenter Margin="6,4" VerticalAlignment="Center"
+                                                                  RecognizesAccessKey="True" />
+                                            </Border>
+                                            <!-- PART_HeaderGripper：列宽拖拽手柄；透明模板避免画出方块 -->
+                                            <Thumb x:Name="PART_HeaderGripper" Width="18"
+                                                   HorizontalAlignment="Right" Cursor="SizeWE">
+                                                <Thumb.Template>
+                                                    <ControlTemplate TargetType="Thumb">
+                                                        <Rectangle Fill="Transparent" />
+                                                    </ControlTemplate>
+                                                </Thumb.Template>
+                                            </Thumb>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="HdBd" Property="Background" Value="#EFEFEF" />
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="HdBd" Property="Background" Value="#E2E2E2" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListView.Resources>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Foreground" Value="Black" />
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListViewItem">
+                                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                                SnapsToDevicePixels="True">
+                                            <GridViewRowPresenter Content="{TemplateBinding Content}"
+                                                                  Margin="{TemplateBinding Padding}"
+                                                                  HorizontalAlignment="Stretch"
+                                                                  VerticalAlignment="Center"
+                                                                  Columns="{TemplateBinding GridView.ColumnCollection}" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#F2F2F2" />
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#E0E0E0" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.View>
+                        <!-- 列由代码按 settings.json 动态组装（可隐藏/增列）；
+                             右键空白区/列头弹列开关菜单，条目上右键弹行操作菜单 -->
+                        <GridView x:Name="ResultGrid" />
+                    </ListView.View>
+                </ListView>
+                <TextBlock Grid.Row="1" x:Name="EmptyHint" Text="没有字体支持这些字符" FontSize="16" Foreground="#999"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+            </Grid>
+
+            <GridSplitter x:Name="PaneSplitter" Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Background="#DDD" ShowsPreview="True" />
+
+            <!-- 大预览区：注意 Run.Text 不是依赖属性，动态文本一律用 TextBlock.Text 绑定 -->
+            <ScrollViewer x:Name="PreviewPane" Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                          PreviewMouseWheel="PreviewPane_PreviewMouseWheel">
+                <StackPanel Margin="16,12" DataContext="{Binding SelectedItem, ElementName=ResultList}">
+                    <TextBlock Text="预览" FontSize="13" Foreground="#888" Margin="0,0,0,4" />
+                    <local:GlyphPreview Text="{Binding QueryText}" Face="{Binding Face}" FontSize="120"
+                                        Margin="0,0,0,16" Foreground="#222" />
+
+                    <TextBlock Text="示例文本（可编辑）" FontSize="13" Foreground="#888" Margin="0,0,0,4" />
+                    <TextBox x:Name="SampleBox" Margin="0,0,0,4" Padding="4,3" FontSize="13"
+                             Text="永 AaBbCc 0123 快捷的棕色狐狸跳过懒惰的狗 The quick brown fox" />
+                    <local:GlyphPreview Text="{Binding Text, ElementName=SampleBox}"
+                                        Face="{Binding Face}" FontSize="22" Foreground="#333" Margin="0,0,0,16" />
+
+                    <TextBlock Text="字体信息" FontSize="13" Foreground="#888" Margin="0,8,0,4" />
+                    <ItemsControl ItemsSource="{Binding InfoSections}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,6,0,0">
+                                    <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#888" />
+                                    <ItemsControl ItemsSource="{Binding Lines}" Margin="10,2,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBox Style="{StaticResource SelText}" Text="{Binding Path=., Mode=OneWay}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Margin="0,10,0,0" Foreground="#1565C0" Cursor="Hand"
+                               TextDecorations="Underline" Text="在资源管理器中打开文件位置"
+                               ToolTip="{Binding FilePathDisplay}"
+                               MouseLeftButtonDown="PathLabel_Click" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</Window>
