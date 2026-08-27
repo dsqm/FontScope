@@ -34,9 +34,11 @@ jobs:
       - name: 打包 zip
         shell: pwsh
         run: |
-          Copy-Item LICENSE publish/framework-dependent/LICENSE -Force
-          Compress-Archive -Path publish/framework-dependent/* `
-            -DestinationPath "FontScope-v${{ steps.ver.outputs.version }}-win-x64.zip"
+          $dir = "FontScope"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Copy-Item -Path "publish/framework-dependent/*" -Destination $dir -Recurse -Force
+          Copy-Item LICENSE "$dir/LICENSE" -Force
+          Compress-Archive -Path $dir -DestinationPath "FontScope-v${{ steps.ver.outputs.version }}-win-x64.zip"
 
       # 每次 push 都能下载到构建产物
       - name: 上传构建产物（artifact）
