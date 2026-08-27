@@ -254,9 +254,11 @@
                                         Margin="0,0,0,16" Foreground="#222" />
 
                     <TextBlock Text="示例文本（可编辑）" FontSize="13" Foreground="#888" Margin="0,0,0,4" />
+                    <!-- 回车才刷新预览：避免每次击键都重渲染字形（彩色字体走 D2D 较慢） -->
                     <TextBox x:Name="SampleBox" Margin="0,0,0,4" Padding="4,3" FontSize="13"
-                             Text="永 AaBbCc 0123 快捷的棕色狐狸跳过懒惰的狗 The quick brown fox" />
-                    <local:GlyphPreview Text="{Binding Text, ElementName=SampleBox}"
+                             Text="永 AaBbCc 0123 快捷的棕色狐狸跳过懒惰的狗 The quick brown fox"
+                             KeyDown="SampleBox_KeyDown" />
+                    <local:GlyphPreview x:Name="SampleGlyph"
                                         Face="{Binding Face}" FontSize="22" Foreground="#333" Margin="0,0,0,16" />
 
                     <TextBlock Text="字体信息" FontSize="13" Foreground="#888" Margin="0,8,0,4" />

@@ -89,25 +89,71 @@ internal static class D2dTextRenderer
         }
     }
 
-    // 公共绘制：给定字体集合与族名，DCRenderTarget + DrawTextLayout(EnableColorFont)
+    // 公共绘制：给定字体集合与族名，DCRenderTarget + 按"字体是否覆盖"切段渲染：
+    //   - 覆盖段走 DrawTextLayout(EnableColorFont)——保留彩色字形，段宽 = layout Metrics.Width；
+    //   - 不覆盖段画空心方框（豆腐块），段宽 ≈ emSize*0.6*字符数（贴近中文字宽的均值）。
+    // 这样 DirectWrite 的系统字体回退不再被触发，所见即该物理 face 的真实字形——
+    // emoji 字体不覆盖的中文显示为豆腐块，而非被系统字体替代。
     internal static WriteableBitmap? DrawLayout(Vortice.DirectWrite.IDWriteFontCollection coll, string family,
         FaceInfo face, string text, float emSize, System.Windows.Media.Color fc)
     {
+        // 找族内 weight 对应的 font → 拿到 IDWriteFontFace 用于"是否覆盖"判断
+        // （DrawTextLayout 内部也会按 weight 挑同一 font，覆盖与渲染保持一致）
+        if (!coll.FindFamilyName(family, out int famIdx)) return null;
+        var fam = coll.GetFontFamily(famIdx);
+        var dwFont = MatchFontByWeight(fam, face.WeightClass, face.IsItalic);
+        if (dwFont == null) return null;
+        using var fontFace = dwFont.CreateFontFace();
+
+        // 切段：按码点连续覆盖与否合并
+        var runs = BuildRuns(text, fontFace);
+
+        // 覆盖段建 TextFormat + TextLayout（每段独立 shape，禁回退自然成立）；累计总宽与行高
+        float pad = MathF.Max(emSize * 0.15f, 4f);
+        float totalW = 0, maxH = 0;
+        var segLayouts = new List<(float w, Vortice.DirectWrite.IDWriteTextLayout layout)>();
+        foreach (var (seg, covered) in runs)
+        {
+            if (covered)
+            {
+                using var fmt = DW.CreateTextFormat(family, coll,
+                    (FontWeight)face.WeightClass,
+                    face.IsItalic ? FontStyle.Italic : FontStyle.Normal,
+                    FontStretch.Normal, emSize, "");
+                var layout = DW.CreateTextLayout(seg, fmt, 4096f, 4096f);
+                var m = layout.Metrics;
+                if (m.Height > maxH) maxH = m.Height;
+                segLayouts.Add((m.Width, layout));
+                totalW += m.Width;
+            }
+            else
+            {
+                segLayouts.Add((0, null!));
+                totalW += emSize * 0.6f * GlyphPreviewHelper.CodePointsOf(seg).Count();
+            }
+        }
+        if (maxH <= 0) maxH = emSize * 1.4f; // 空文本/全缺字兜底
+
+        // 缺字 .notdef 的 baseline：取首个覆盖段的真实 baseline（相对 linebox 顶）；
+        // 全缺字时用 emSize*0.8 估
+        float baseline = pad + emSize * 0.8f;
+        foreach (var (_, layout) in segLayouts)
+        {
+            if (layout != null)
+            {
+                var lm = layout.LineMetrics;
+                if (lm.Length > 0) { baseline = pad + lm[0].Baseline; break; }
+                break;
+            }
+        }
+
+        int w = (int)MathF.Ceiling(totalW + pad * 2);
+        int h = (int)MathF.Ceiling(maxH + pad * 2);
+        if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return null;
+
         IntPtr hdc = IntPtr.Zero, dib = IntPtr.Zero;
         try
         {
-            using var fmt = DW.CreateTextFormat(family, coll,
-                (FontWeight)face.WeightClass,
-                face.IsItalic ? FontStyle.Italic : FontStyle.Normal,
-                FontStretch.Normal, emSize, "");
-            using var layout = DW.CreateTextLayout(text, fmt, 4096f, 4096f);
-            var m = layout.Metrics;
-
-            float pad = MathF.Max(emSize * 0.15f, 4f);
-            int w = (int)MathF.Ceiling(m.Width + pad * 2);
-            int h = (int)MathF.Ceiling(m.Height + pad * 2);
-            if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return null;
-
             hdc = CreateCompatibleDC(IntPtr.Zero);
             var bmi = new BITMAPINFO();
             bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
@@ -130,10 +176,28 @@ internal static class D2dTextRenderer
                 new Color4(fc.R / 255f, fc.G / 255f, fc.B / 255f, 1f), null);
             rtBase.BeginDraw();
             rtBase.Clear(new Color4(0f, 0f, 0f, 0f));
-            // 平移使墨迹区精确落在 (pad, pad)：ink 占据 linebox 内的 [Left,Left+Width]×[Top,Top+Height]
-            rtBase.DrawTextLayout(
-                new Vector2(pad - m.Left, pad - m.Top),
-                layout, brush, DrawTextOptions.EnableColorFont);
+
+            // 顺序按段绘制：覆盖段 DrawTextLayout；缺字段画字体自带 .notdef 字形（豆腐块）
+            float x = pad;
+            for (int i = 0; i < runs.Count; i++)
+            {
+                var (seg, covered) = runs[i];
+                if (covered && segLayouts[i].layout != null)
+                {
+                    var (segW, layout) = segLayouts[i];
+                    var m = layout.Metrics;
+                    rtBase.DrawTextLayout(
+                        new Vector2(x - m.Left, pad - m.Top),
+                        layout, brush, DrawTextOptions.EnableColorFont);
+                    x += segW;
+                }
+                else
+                {
+                    float tw = emSize * 0.6f * GlyphPreviewHelper.CodePointsOf(seg).Count();
+                    DrawTofu(rtBase, fontFace, brush, x, baseline, emSize);
+                    x += tw;
+                }
+            }
             var end = rtBase.EndDraw(out _, out _);
             if (end.Failure) return null;
 
@@ -150,5 +214,78 @@ internal static class D2dTextRenderer
             if (dib != IntPtr.Zero) DeleteObject(dib);
             if (hdc != IntPtr.Zero) DeleteDC(hdc);
         }
+    }
+
+    // 切段：按码点连续覆盖与否合并。覆盖 = face.GetGlyphIndices(cp)[0] != 0
+    static List<(string seg, bool covered)> BuildRuns(string text, Vortice.DirectWrite.IDWriteFontFace fontFace)
+    {
+        var runs = new List<(string seg, bool covered)>();
+        for (int i = 0; i < text.Length; )
+        {
+            int cp = char.ConvertToUtf32(text, i);
+            int clen = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            bool cov = fontFace.GetGlyphIndices(new[] { cp })[0] != 0;
+            string seg = text.Substring(i, clen);
+            if (runs.Count > 0 && runs[^1].covered == cov)
+                runs[^1] = (runs[^1].seg + seg, cov);
+            else runs.Add((seg, cov));
+            i += clen;
+        }
+        return runs;
+    }
+
+    // 按字重（必要时按斜体）在族内找最接近的 font；找不到取第一个
+    static Vortice.DirectWrite.IDWriteFont? MatchFontByWeight(
+        Vortice.DirectWrite.IDWriteFontFamily fam, ushort wantWeight, bool wantItalic)
+    {
+        int n = fam.FontCount;
+        if (n <= 0) return null;
+        Vortice.DirectWrite.IDWriteFont? bestExact = null, bestClose = null, first = null;
+        int bestDelta = int.MaxValue;
+        for (int i = 0; i < n; i++)
+        {
+            var f = fam.GetFont(i);
+            first ??= f;
+            bool italic = f.Style == Vortice.DirectWrite.FontStyle.Italic;
+            if (italic != wantItalic) continue;
+            int delta = Math.Abs((int)f.Weight - (int)wantWeight);
+            if (delta == 0) { bestExact = f; break; }
+            if (delta < bestDelta) { bestDelta = delta; bestClose = f; }
+        }
+        return bestExact ?? bestClose ?? first;
+    }
+
+    // 缺字段占位：画该字体自己的 .notdef 字形（glyph 0，即标准"豆腐块"）——
+    // 形状、大小都是字体自带的，比手画矩形自然；宽 = 字体真实 .notdef advance
+    static void DrawTofu(Vortice.Direct2D1.ID2D1RenderTarget rt,
+        Vortice.DirectWrite.IDWriteFontFace fontFace, Vortice.Direct2D1.ID2D1SolidColorBrush brush,
+        float left, float baseline, float emSize)
+    {
+        float adv = GetNotdefAdvance(fontFace, emSize);
+        var run = new Vortice.DirectWrite.GlyphRun
+        {
+            FontFace = fontFace,
+            FontEmSize = emSize,
+            Indices = new ushort[] { 0 },
+            Advances = new float[] { adv },
+            Offsets = new Vortice.DirectWrite.GlyphOffset[] { default },
+            IsSideways = false,
+            BidiLevel = 0,
+        };
+        rt.DrawGlyphRun(new Vector2(left, baseline), run, brush);
+    }
+
+    // 字体 glyph 0 的 advance（像素），下限 emSize*0.5 防字体度量异常时挤成一团
+    static float GetNotdefAdvance(Vortice.DirectWrite.IDWriteFontFace fontFace, float emSize)
+    {
+        float adv;
+        try
+        {
+            var metrics = fontFace.GetDesignGlyphMetrics(new ushort[] { 0 }, false);
+            float upem = fontFace.Metrics.DesignUnitsPerEm;
+            adv = upem > 0 ? metrics[0].AdvanceWidth / upem * emSize : emSize * 0.6f;
+        }
+        catch { adv = emSize * 0.6f; }
+        return MathF.Max(adv, emSize * 0.5f);
     }
 }

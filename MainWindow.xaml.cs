@@ -125,6 +125,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _inputBaseFont = InputBox.FontFamily.Source; // 回退链的基底，之后只在此基础上追加
         LoadSettings();
+        SampleGlyph.Text = SampleBox.Text; // 示例文本预览初始同步（此后回车才刷新）
         ApplyPane();
         RebuildColumns();
         BuildColumnMenu();
@@ -466,6 +467,13 @@ public partial class MainWindow : Window
     {
         if (!_scanning) QueryButton.IsEnabled = InputBox.Text.Length > 0;
         ApplyInputFontFallback();
+    }
+
+    // 示例文本：回车才刷新下方预览（避免每击键都重渲染字形）
+    void SampleBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        SampleGlyph.Text = SampleBox.Text;
     }
 
     // ---------- 输入框系统字体回退：WPF 缺字只查复合字体表，不扫系统字体，

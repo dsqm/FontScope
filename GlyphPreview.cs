@@ -71,6 +71,11 @@ public class GlyphPreview : FrameworkElement
         var sig = Sig();
         if (_bitmap != null && sig == _sig) return _logical;
 
+        // 内容/字体/字号有变：显式请求重画。WPF 布局系统在"新尺寸与旧尺寸相同"
+        // 时会跳过 OnRender（只重排不重画），而本控件重渲染的结果恰好可能同尺寸
+        // （如把「永」改成「好」，或 D2D 路径的豆腐块占位）——不强制重画就显示旧图。
+        InvalidateVisual();
+
         var text = Text;
         var face = Face;
         if (face == null || string.IsNullOrEmpty(text)) return new Size(0, 0);
