@@ -9,7 +9,7 @@
     <AssemblyName>FontScope</AssemblyName>
     <RootNamespace>FontScope</RootNamespace>
     <!-- 版本号单一来源：改这里即可，「关于」弹窗自动读取程序集版本 -->
-    <Version>0.2</Version>
+    <Version>0.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
