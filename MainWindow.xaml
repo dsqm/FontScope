@@ -368,7 +368,14 @@
                 <StackPanel Margin="16,12" DataContext="{Binding SelectedItem, ElementName=ResultList}">
                     <TextBlock Text="预览" FontSize="13" Foreground="#888" Margin="0,0,0,4" />
                     <local:GlyphPreview Text="{Binding QueryText}" Face="{Binding Face}" FontSize="120"
-                                        Margin="0,0,0,16" Foreground="#222" />
+                                        Margin="0,0,0,10" Foreground="#222" />
+
+                    <!-- 码位：每字一个 U+XXXX，空格分隔（支持代理对字符如 𰻝 → U+30EDD） -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <TextBlock Text="码位：" FontSize="13" Foreground="#888" />
+                        <TextBlock Text="{Binding CodePointsDisplay}" FontSize="13" Foreground="#333"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
 
                     <TextBlock Text="示例文本（可编辑）" FontSize="13" Foreground="#888" Margin="0,0,0,4" />
                     <!-- 回车才刷新预览：避免每次击键都重渲染字形（彩色字体走 D2D 较慢） -->

@@ -25,6 +25,10 @@ public record ResultRow(FaceInfo Face, string QueryText)
     public string FilePathDisplay => Face.FilePath;
     public string FormatDisplay => Face.FormatDisplay;
 
+    // 查询文本的 Unicode 码位展示：每字一个 U+XXXX（至少 4 位补零），空格分隔（代理对字符如 𰻝 → U+30EDD）
+    public string CodePointsDisplay => string.Join(" ",
+        GlyphPreviewHelper.CodePointsOf(QueryText).Select(cp => $"U+{cp:X4}"));
+
     // 可选列的单元格数据
     public string StyleOnly => Face.StyleDisplay;
     public string WeightDisplay => Face.WeightClass.ToString();
