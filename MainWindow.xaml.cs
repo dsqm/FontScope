@@ -133,6 +133,21 @@ public partial class MainWindow : Window
         BuildScopeItems();
         QueryButton.IsEnabled = false;
         Closing += (_, _) => SaveSettings();
+        // 切到其他程序时关闭 Unicode 小键盘（Popup 独立 HWND，不会自动跟随隐藏）
+        Deactivated += (_, _) =>
+        {
+            if (!UnicodePopup.IsOpen) return;
+            // 延迟到焦点转移完成后判断：焦点仍在 Popup 内（弹窗抢焦点等）则不关，真切走才关
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+            {
+                if (UnicodePopup.IsOpen
+                    && UnicodePopup.Child is UIElement child
+                    && !child.IsKeyboardFocusWithin)
+                {
+                    UnicodePopup.IsOpen = false;
+                }
+            });
+        };
         // 列头点击排序（列是动态组装的，统一走路由事件）
         ResultList.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(Header_Click));
         Loaded += (_, _) => StartScan();
@@ -462,6 +477,147 @@ public partial class MainWindow : Window
     // ---------- 查询 ----------
 
     void Query_Click(object sender, RoutedEventArgs e) => DoQuery();
+
+    // ---------- Unicode 码位输入小键盘（Popup 锚定在 U+ 按钮正下方） ----------
+
+    // 累积的已确认字符（连续输入）
+    readonly List<string> _confirmedChars = new();
+
+    void UnicodeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _confirmedChars.Clear();
+        // 不清空 CodeInput：保留上次输入的码位（误关/重开不丢失）
+        UnicodePopup.IsOpen = !UnicodePopup.IsOpen;
+    }
+
+    // Popup 打开后：右边缘对齐 U+ 按钮右边缘（向左展开，避免超出主窗口右侧），
+    // 给输入框焦点，然后禁用主窗口实现模态（Popup 是独立 HWND，不受主窗口禁用影响）
+    void UnicodePopup_Opened(object sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            // 默认 Placement=Bottom 是左边缘对齐；向右回退"Popup 宽 - 按钮宽"，使右边缘对齐按钮右边缘
+            if (UnicodePopup.Child is FrameworkElement child)
+                UnicodePopup.HorizontalOffset = -(child.ActualWidth - UnicodeButton.ActualWidth);
+            CodeInput.Focus();
+            Keyboard.Focus(CodeInput);
+            IsEnabled = false; // 主窗口灰化禁用，点击外部无效果（模态）
+        });
+    }
+
+    // Popup 关闭（完成/取消/ESC）时恢复主窗口，并处理查询
+    void UnicodePopup_Closed(object sender, EventArgs e)
+    {
+        IsEnabled = true;
+        // 关闭时若确认过字符且主输入框有内容，一并查询
+        if (_confirmedChars.Count > 0 && InputBox.Text.Length > 0)
+            DoQuery();
+    }
+
+    void KeyButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Content: string key } && key.Length == 1)
+            AppendCodeChar(key[0]);
+    }
+
+    // 只允许 0-9, A-F, a-f
+    void CodeInput_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (e.Text.Length > 0 && !"0123456789ABCDEFabcdef".Contains(e.Text[0]))
+            e.Handled = true;
+    }
+
+    void CodeInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Back)
+        {
+            var txt = CodeInput;
+            if (txt.SelectionStart > 0)
+            {
+                var pos = txt.SelectionStart;
+                txt.Text = txt.Text.Remove(pos - 1, 1);
+                txt.SelectionStart = pos - 1;
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            SubmitCodeOrFinish();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            UnicodePopup.IsOpen = false;
+            e.Handled = true;
+        }
+    }
+
+    void ClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        CodeInput.Clear();
+        CodeInput.Focus();
+    }
+
+    void AppendCodeChar(char c)
+    {
+        if (CodeInput.Text.Length >= 6) return; // 最大 10FFFF（6位）
+        var pos = CodeInput.SelectionStart + CodeInput.SelectionLength;
+        CodeInput.Text = CodeInput.Text.Insert(pos, char.ToUpper(c).ToString());
+        CodeInput.SelectionStart = pos + 1;
+        CodeInput.Focus();
+    }
+
+    void SubmitButton_Click(object sender, RoutedEventArgs e) => SubmitCodeOrFinish();
+
+    // 有内容：解析码位发字符、清空继续（不关闭）；空：关闭 Popup 并查询
+    void SubmitCodeOrFinish()
+    {
+        var codeText = CodeInput.Text.Trim();
+        if (codeText.Length > 0)
+        {
+            if (TryEmitCode(codeText)) { CodeInput.Clear(); CodeInput.Focus(); }
+            return;
+        }
+        CloseUnicodePopup();
+    }
+
+    bool TryEmitCode(string codeText)
+    {
+        if (!uint.TryParse(codeText, System.Globalization.NumberStyles.HexNumber, null, out uint cp))
+        { ShowCodeHint("无效的 Unicode 码位"); return false; }
+        if (cp > 0x10FFFF)
+        { ShowCodeHint("超出范围（最大 10FFFF）"); return false; }
+        if (cp >= 0xD800 && cp <= 0xDFFF)
+        { ShowCodeHint("代理区不可单独使用"); return false; }
+
+        try
+        {
+            var s = char.ConvertFromUtf32((int)cp); // 自动处理代理对
+            _confirmedChars.Add(s);
+            InputBox.Text += s;
+            InputBox.CaretIndex = InputBox.Text.Length;
+            return true;
+        }
+        catch
+        {
+            ShowCodeHint("无法转换该码位");
+            return false;
+        }
+    }
+
+    void ShowCodeHint(string message)
+    {
+        CodeInput.ToolTip = message;
+        CodeInput.Focus();
+    }
+
+    void CancelButton_Click(object sender, RoutedEventArgs e) => CloseUnicodePopup();
+
+    // 关闭 Popup（恢复主窗口与查询逻辑统一在 UnicodePopup_Closed 处理）
+    void CloseUnicodePopup()
+    {
+        UnicodePopup.IsOpen = false;
+    }
 
     void InputBox_TextChanged(object sender, TextChangedEventArgs e)
     {

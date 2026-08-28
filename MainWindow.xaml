@@ -7,6 +7,36 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
+        <!-- Unicode 小键盘按键样式 -->
+        <Style x:Key="KeyButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="3,2" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="BorderBrush" Value="#DDD" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E0E0E0" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#D0D0D0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 信息区行文本：只读无边框 TextBox，支持鼠标选择与复制 -->
         <Style x:Key="SelText" TargetType="TextBox">
             <Setter Property="IsReadOnly" Value="True" />
@@ -54,12 +84,99 @@
         <!-- 顶部：查询输入 -->
         <Border DockPanel.Dock="Top" Padding="10,8" Background="#F5F5F5">
             <DockPanel>
+                <Button x:Name="UnicodeButton" DockPanel.Dock="Right" Content="U+" Width="50"
+                        Click="UnicodeButton_Click" Margin="8,0,0,0" Padding="0,4"
+                        ToolTip="通过 Unicode 码位输入字符" />
                 <Button x:Name="QueryButton" DockPanel.Dock="Right" Content="查询" Width="80"
                         IsDefault="True" Click="Query_Click" Margin="8,0,0,0" Padding="0,4" />
                 <TextBox x:Name="InputBox" FontSize="20" Padding="6,4" VerticalContentAlignment="Center"
                          ToolTip="输入要查询的字符（可多个，回车查询）" TextChanged="InputBox_TextChanged" />
             </DockPanel>
         </Border>
+        <!-- Unicode 码位小键盘：Popup 天然锚定在 U+ 按钮正下方（自动处理 DPI/屏幕边界，无需手动定位）。
+             StaysOpen=True + 打开时禁用主窗口 → 模态效果：点击外部不消失、外部不可点 -->
+        <Popup x:Name="UnicodePopup" PlacementTarget="{Binding ElementName=UnicodeButton}"
+                   Placement="Bottom" StaysOpen="True" AllowsTransparency="True"
+                   PopupAnimation="Fade"
+                   Opened="UnicodePopup_Opened" Closed="UnicodePopup_Closed">
+                <Border Background="White" BorderBrush="#AAA" BorderThickness="1" Padding="14,12"
+                        SnapsToDevicePixels="True">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.25" />
+                    </Border.Effect>
+                    <StackPanel Width="172">
+                        <!-- 输入区：U+ 前缀 + 输入框 + 清除按钮 -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="U+" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0"
+                                       Foreground="#666" />
+                            <TextBox x:Name="CodeInput" Grid.Column="1" FontSize="16" Padding="5,3"
+                                     VerticalContentAlignment="Center" MaxLength="6"
+                                     PreviewTextInput="CodeInput_PreviewTextInput"
+                                     KeyDown="CodeInput_KeyDown" />
+                            <Button Grid.Column="2" Content="✕" Width="30" Height="30" Margin="5,0,0,0"
+                                    Click="ClearButton_Click" FontSize="13"
+                                    ToolTip="清除" Background="#E8E8E8" BorderThickness="0" />
+                        </Grid>
+
+                        <!-- 十六进制键盘：3列 x 6行 -->
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Button Grid.Row="0" Grid.Column="0" Content="D" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="0" Grid.Column="1" Content="E" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="0" Grid.Column="2" Content="F" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+
+                            <Button Grid.Row="1" Grid.Column="0" Content="A" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="1" Grid.Column="1" Content="B" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="1" Grid.Column="2" Content="C" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+
+                            <Button Grid.Row="2" Grid.Column="0" Content="7" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="2" Grid.Column="1" Content="8" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="2" Grid.Column="2" Content="9" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+
+                            <Button Grid.Row="3" Grid.Column="0" Content="4" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="3" Grid.Column="1" Content="5" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="3" Grid.Column="2" Content="6" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+
+                            <Button Grid.Row="4" Grid.Column="0" Content="1" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="4" Grid.Column="1" Content="2" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                            <Button Grid.Row="4" Grid.Column="2" Content="3" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+
+                            <Button Grid.Row="5" Grid.Column="1" Content="0" Style="{StaticResource KeyButtonStyle}" Click="KeyButton_Click" />
+                        </Grid>
+
+                        <!-- 底部按钮：取消 + 完成 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="取消" Padding="0,6" Click="CancelButton_Click"
+                                    Background="Transparent" BorderBrush="#CCC" BorderThickness="1" />
+                            <Button Grid.Column="1" Content="完成" Margin="8,0,0,0" Padding="0,6"
+                                    Click="SubmitButton_Click" IsDefault="True"
+                                    Background="#1976D2" BorderBrush="#1976D2" Foreground="White" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Popup>
 
         <!-- 顶部：自定义文件夹管理 -->
         <Border DockPanel.Dock="Top" Padding="10,4" Background="#FAFAFA" BorderBrush="#DDD" BorderThickness="0,1,0,1">
