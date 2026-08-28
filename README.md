@@ -19,8 +19,10 @@ https://docs.qq.com/aio/DRWtMY3FQS0ZHRGRG
 
 ## 环境要求
 
-- Windows 10 及以上（x64）
-- 运行：[.NET 6 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/6.0)（自包含发布则无需安装）
+- Windows 7 及以上（x64）
+  *注意 Windows 7 不支持渲染彩色emoji*
+
+- 运行：[.NET 6 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/6.0)
 - 编译：.NET 6 SDK
 
 ## 构建与发布
