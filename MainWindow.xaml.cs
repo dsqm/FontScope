@@ -406,6 +406,16 @@ public partial class MainWindow : Window
         : v.Revision == 0 ? $"{v.Major}.{v.Minor}.{v.Build}"
         : v.ToString();
 
+    // ---------- 忙碌覆盖层（列表中央转圈） ----------
+
+    void ShowLoading(string text)
+    {
+        LoadingText.Text = text;
+        LoadingOverlay.Visibility = Visibility.Visible;
+    }
+
+    void HideLoading() => LoadingOverlay.Visibility = Visibility.Collapsed;
+
     // ---------- 扫描 ----------
 
     async void StartScan(bool force = false)
@@ -416,9 +426,14 @@ public partial class MainWindow : Window
         RescanButton.IsEnabled = false;
         ScopeToggle.IsEnabled = false; // 扫描期间禁用范围下拉，避免并发重扫
         StatusText.Text = "正在扫描字体…";
+        ShowLoading("正在扫描字体…");
 
         var progress = new Progress<(int done, int total)>(p =>
-            StatusText.Text = $"正在扫描字体… {p.done}/{p.total}");
+        {
+            var t = $"正在扫描字体… {p.done}/{p.total}";
+            StatusText.Text = t;
+            ShowLoading(t); // 中央同步显示进度，比仅状态栏明显
+        });
 
         try
         {
@@ -429,10 +444,14 @@ public partial class MainWindow : Window
             StatusText.Text = "扫描失败：" + ex.Message;
             App.Log(ex);
         }
+        finally
+        {
+            _scanning = false;
+            ScopeToggle.IsEnabled = true;
+            RescanButton.IsEnabled = true;
+            HideLoading(); // 后续查询若耗时，DoQuery 会自行再次显示
+        }
 
-        _scanning = false;
-        ScopeToggle.IsEnabled = true;
-        RescanButton.IsEnabled = true;
         AfterFacesChanged();
     }
 
@@ -462,13 +481,15 @@ public partial class MainWindow : Window
         else { _allRows = new(); ApplyFilter(); } // 无查询词时清掉旧结果
     }
 
-    // 当前启用的扫描来源（顺序即优先级：系统 → 用户 → 自定义）
-    IEnumerable<(string Dir, FontSource Src)> EnabledSources()
+    // 当前启用的扫描来源（顺序即优先级：系统 → 用户 → 自定义）。
+    // Recursive 仅对自定义文件夹生效，系统/用户目录固定不递归。
+    IEnumerable<(string Dir, FontSource Src, bool Recursive)> EnabledSources()
     {
-        if (_sysItem?.Enabled == true) yield return (FontScanner.SystemFontDir, FontSource.System);
-        if (_usrItem?.Enabled == true) yield return (FontScanner.UserFontDir, FontSource.User);
+        if (_sysItem?.Enabled == true) yield return (FontScanner.SystemFontDir, FontSource.System, false);
+        if (_usrItem?.Enabled == true) yield return (FontScanner.UserFontDir, FontSource.User, false);
         foreach (var it in _scopeItems)
-            if (it.FolderPath != null && it.Enabled) yield return (it.FolderPath, FontSource.Custom);
+            if (it.FolderPath != null && it.Enabled)
+                yield return (it.FolderPath, FontSource.Custom, it.Recursive);
     }
 
     int EnabledItemCount() => _scopeItems.Count(i => i.Enabled);
@@ -668,6 +689,7 @@ public partial class MainWindow : Window
             _querying = true;
             QueryButton.IsEnabled = false;
             StatusText.Text = $"命中 {matched.Count} 个 face，正在分析字形…";
+            ShowLoading($"正在分析 {matched.Count} 个字体的字形…"); // 中央转圈，避免"卡住"错觉
             try
             {
                 await Task.Run(() => Parallel.ForEach(matched, f => f.RendersInk(text)));
@@ -677,6 +699,7 @@ public partial class MainWindow : Window
             {
                 _querying = false;
                 QueryButton.IsEnabled = InputBox.Text.Length > 0;
+                HideLoading();
             }
         }
         else
@@ -720,11 +743,18 @@ public partial class MainWindow : Window
         }
 
         ResultList.ItemsSource = ordered.ToList();
+
+        // 未输入查询词（初始进入 / 已清空）时一律不显示空态提示——
+        // 此时只是"还没搜索"，提示"没有字体支持这些字符"会误导。
+        var hasQuery = InputBox.Text.Length > 0;
         EmptyHint.Text = _allRows.Count == 0 ? "没有字体支持这些字符" : "没有匹配过滤条件的字体";
-        EmptyHint.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        StatusText.Text = $"命中 {_allRows.Count} / {_scanner.Faces.Count} 个 face"
-            + (kw.Length > 0 ? $"（过滤后 {rows.Count}）" : "")
-            + (_sortHeader is string sh && sh != "预览" ? $"（按「{sh}」{(_sortDesc ? "降" : "升")}序）" : "");
+        EmptyHint.Visibility = hasQuery && rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        StatusText.Text = hasQuery
+            ? $"命中 {_allRows.Count} / {_scanner.Faces.Count} 个 face"
+                + (kw.Length > 0 ? $"（过滤后 {rows.Count}）" : "")
+                + (_sortHeader is string sh && sh != "预览" ? $"（按「{sh}」{(_sortDesc ? "降" : "升")}序）" : "")
+            : StatusText.Text; // 无查询词时保留"就绪 · 共 N 个字体 face"等状态，不被命中数覆盖
 
         if (rows.Count > 0) ResultList.SelectedIndex = 0;
     }
@@ -885,7 +915,12 @@ public partial class MainWindow : Window
             s.SystemFontsEnabled = _sysItem?.Enabled ?? true;
             s.UserFontsEnabled = _usrItem?.Enabled ?? true;
             s.CustomFolders = _scopeItems.Where(x => x.FolderPath != null)
-                .Select(x => new AppSettings.FolderSetting { Path = x.FolderPath!, Enabled = x.Enabled })
+                .Select(x => new AppSettings.FolderSetting
+                {
+                    Path = x.FolderPath!,
+                    Enabled = x.Enabled,
+                    Recursive = x.Recursive,
+                })
                 .ToList();
             s.ColWidths.Clear();
             foreach (var c in ResultGrid.Columns)
@@ -967,7 +1002,8 @@ public partial class MainWindow : Window
         var path = dlg.SelectedPath;
         if (path.Length > 0 && _scopeItems.All(x => x.FolderPath != path))
         {
-            _scopeItems.Add(new SourceItem(path, "", enabled: true, removable: true, folder: path));
+            _scopeItems.Add(new SourceItem(path, "", enabled: true, removable: true,
+                folder: path, recursive: false)); // 新增默认不递归，可在面板勾选
             UpdateScopeHeader();
             SaveSettings(); // 关键变更即存
             StartScan();    // 解析新目录（其余来源走缓存，瞬时）
@@ -985,7 +1021,8 @@ public partial class MainWindow : Window
         _scopeItems.Add(_usrItem);
         foreach (var f in _settings.CustomFolders)
             if (f.Path.Length > 0 && _scopeItems.All(x => x.FolderPath != f.Path))
-                _scopeItems.Add(new SourceItem(f.Path, "", f.Enabled, removable: true, folder: f.Path));
+                _scopeItems.Add(new SourceItem(f.Path, "", f.Enabled, removable: true,
+                    folder: f.Path, recursive: f.Recursive));
         ScopeList.ItemsSource = _scopeItems;
         UpdateScopeHeader();
     }
@@ -1011,6 +1048,29 @@ public partial class MainWindow : Window
             _scanner.Reassemble(EnabledSources());
             AfterFacesChanged();
         }
+    }
+
+    bool _suppressRecursiveCb; // 回滚勾选态时抑制事件重入
+
+    // 「含子目录」切换：递归与否得到的文件集合不同，缓存键也含递归标记，
+    // 因此启用中的来源必须重新解析（已缓存的其他来源不受影响）。
+    void RecursiveItem_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressRecursiveCb) return;
+        if (((FrameworkElement)sender).DataContext is not SourceItem item) return;
+
+        if (_scanning)
+        {
+            // 扫描中不允许切换：把勾选态弹回，避免 UI 与实际扫描结果不一致
+            var cb = (System.Windows.Controls.CheckBox)sender;
+            _suppressRecursiveCb = true;
+            cb.IsChecked = !item.Recursive; // 此刻 Recursive 已是新值，取反即回滚
+            _suppressRecursiveCb = false;
+            return;
+        }
+
+        SaveSettings();
+        if (item.Enabled) StartScan(); // 未启用的来源仅持久化，不影响当前结果
     }
 
     void RemoveRow_Click(object sender, RoutedEventArgs e)
@@ -1052,6 +1112,7 @@ public sealed class AppSettings
     {
         public string Path { get; set; } = "";
         public bool Enabled { get; set; } = true;
+        public bool Recursive { get; set; }   // 是否递归扫描子文件夹
     }
 
     // 旧版 settings.json 的 CustomFolders 是纯字符串数组，新版是对象数组——
@@ -1074,6 +1135,7 @@ public sealed class AppSettings
                     case JsonTokenType.StartObject:
                         string path = "";
                         bool en = true;
+                        bool rec = false;   // 旧配置无此字段，默认不递归
                         while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
                         {
                             if (reader.TokenType != JsonTokenType.PropertyName) continue;
@@ -1081,9 +1143,10 @@ public sealed class AppSettings
                             reader.Read();
                             if (name == nameof(FolderSetting.Path)) path = reader.GetString() ?? "";
                             else if (name == nameof(FolderSetting.Enabled)) en = reader.GetBoolean();
+                            else if (name == nameof(FolderSetting.Recursive)) rec = reader.GetBoolean();
                             // 未知属性：reader 已停在值 token 上，下一轮 Read 自然跳过
                         }
-                        if (path.Length > 0) list.Add(new FolderSetting { Path = path, Enabled = en });
+                        if (path.Length > 0) list.Add(new FolderSetting { Path = path, Enabled = en, Recursive = rec });
                         break;
                 }
             }
@@ -1102,6 +1165,7 @@ public sealed class AppSettings
 public sealed class SourceItem : System.ComponentModel.INotifyPropertyChanged
 {
     bool _enabled;
+    bool _recursive;
 
     public string Display { get; }      // 勾选框旁主文本
     public string Detail { get; }       // 右侧灰色说明（路径）
@@ -1114,13 +1178,20 @@ public sealed class SourceItem : System.ComponentModel.INotifyPropertyChanged
         set { _enabled = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Enabled))); }
     }
 
+    // 是否递归扫描子文件夹（仅自定义文件夹行；系统/用户目录固定为 false）
+    public bool Recursive
+    {
+        get => _recursive;
+        set { _recursive = value; PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Recursive))); }
+    }
+
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 
     public SourceItem(string display, string detail, bool enabled, bool removable,
-        string? folder = null)
+        string? folder = null, bool recursive = false)
     {
         Display = display; Detail = detail; _enabled = enabled;
-        Removable = removable; FolderPath = folder;
+        Removable = removable; FolderPath = folder; _recursive = recursive;
     }
 }
 

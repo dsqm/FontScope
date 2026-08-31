@@ -21,43 +21,51 @@ public sealed class FontScanner
 
     sealed class SourceResult { public List<FaceInfo> Faces = new(); public int Failed; }
 
-    // 目录 -> 解析结果缓存（跨勾选切换存活；force 重扫时清除）
+    // (目录, 递归标记) -> 解析结果缓存（跨勾选切换存活；force 重扫时清除）。
+    // 键必须含递归标记：同一目录递归与否得到的文件集合不同，混用会互相污染。
     readonly Dictionary<string, SourceResult> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    // 缓存键：目录 + 递归标记（'|' 不可能是 Windows 路径字符，安全分隔）
+    static string CacheKey(string dir, bool recursive) => recursive ? dir + "|R" : dir + "|T";
 
     /// <summary>
     /// 读盘解析尚未缓存的启用来源并拼装 Faces。
     /// force=true 时先丢弃启用来源的旧缓存全部重扫（「重新扫描」按钮语义）。
     /// sources 应按优先级传入：系统 → 用户 → 自定义。
     /// </summary>
-    public Task ScanAsync(IEnumerable<(string Dir, FontSource Src)> sources,
+    public Task ScanAsync(IEnumerable<(string Dir, FontSource Src, bool Recursive)> sources,
         bool force = false, IProgress<(int done, int total)>? progress = null, CancellationToken ct = default)
     {
         return Task.Run(() =>
         {
             var wanted = sources.Where(s => Directory.Exists(s.Dir)).ToList();
             if (force)
-                foreach (var d in wanted.Select(s => s.Dir))
+                foreach (var d in wanted.Select(s => CacheKey(s.Dir, s.Recursive)))
                     _cache.Remove(d);
 
-            var pending = new List<(string Dir, FontSource Src)>();
+            var pending = new List<(string Dir, FontSource Src, bool Recursive)>();
             var seenDir = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var s in wanted)
-                if (!seenDir.Add(s.Dir)) continue;
-                else if (!_cache.ContainsKey(s.Dir)) pending.Add(s);
+                if (!seenDir.Add(CacheKey(s.Dir, s.Recursive))) continue;
+                else if (!_cache.ContainsKey(CacheKey(s.Dir, s.Recursive))) pending.Add(s);
 
             // 展平为文件清单（同一文件只计最先命中的来源）
             var files = new List<(string Path, FontSource Src, string Dir)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (dir, src) in pending)
+            foreach (var (dir, src, recursive) in pending)
             {
                 try
                 {
-                    var opt = new EnumerationOptions { IgnoreInaccessible = true };
+                    var opt = new EnumerationOptions
+                    {
+                        IgnoreInaccessible = true,
+                        RecurseSubdirectories = recursive, // 勾选「含子目录」才下钻
+                    };
                     foreach (var f in Directory.EnumerateFiles(dir, "*", opt))
                     {
                         if (!FontExts.Contains(Path.GetExtension(f).ToLowerInvariant())) continue;
                         if (!seen.Add(f)) continue;
-                        files.Add((f, src, dir));
+                        files.Add((f, src, CacheKey(dir, recursive)));
                     }
                 }
                 catch { }
@@ -86,12 +94,13 @@ public sealed class FontScanner
                     progress?.Report((d, files.Count));
             });
 
-            foreach (var dir in pending.Select(p => p.Dir))
+            foreach (var p in pending)
             {
-                _cache[dir] = new SourceResult
+                var key = CacheKey(p.Dir, p.Recursive);
+                _cache[key] = new SourceResult
                 {
-                    Faces = perDirBag.TryGetValue(dir, out var b) ? b.ToList() : new(),
-                    Failed = perDirFail.TryGetValue(dir, out var n) ? n : 0,
+                    Faces = perDirBag.TryGetValue(key, out var b) ? b.ToList() : new(),
+                    Failed = perDirFail.TryGetValue(key, out var n) ? n : 0,
                 };
             }
 
@@ -100,15 +109,15 @@ public sealed class FontScanner
     }
 
     /// <summary>仅按启用来源重新拼装 Faces 与失败计数（零 IO）。用于扫描范围勾选切换。</summary>
-    public void Reassemble(IEnumerable<(string Dir, FontSource Src)> sources)
+    public void Reassemble(IEnumerable<(string Dir, FontSource Src, bool Recursive)> sources)
     {
         // 去重键必须含 FaceIndex：同一 TTC 的所有 face 共享 FilePath，仅按路径去重会丢失其余面
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var faces = new List<FaceInfo>();
         int failed = 0;
-        foreach (var (dir, _) in sources)
+        foreach (var (dir, _, recursive) in sources)
         {
-            if (!_cache.TryGetValue(dir, out var c)) continue;
+            if (!_cache.TryGetValue(CacheKey(dir, recursive), out var c)) continue;
             failed += c.Failed;
             foreach (var f in c.Faces)
                 if (seen.Add(f.FilePath + "#" + f.FaceIndex)) faces.Add(f);

@@ -212,6 +212,7 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <CheckBox VerticalAlignment="Center"
                                                           IsChecked="{Binding Enabled, Mode=TwoWay}"
@@ -222,7 +223,14 @@
                                                     <TextBlock Text="{Binding Detail}" Foreground="#999" FontSize="11"
                                                                Margin="8,0,0,0" />
                                                 </StackPanel>
-                                                <Button Grid.Column="2" Content="移除" Padding="6,0" Margin="8,0,0,0"
+                                                <!-- 含子目录：仅自定义文件夹行显示；切换需重扫（文件集合变化） -->
+                                                <CheckBox Grid.Column="2" Content="含子目录" VerticalAlignment="Center"
+                                                          Margin="10,0,0,0" FontSize="11"
+                                                          IsChecked="{Binding Recursive, Mode=TwoWay}"
+                                                          Visibility="{Binding Removable, Converter={StaticResource BoolToVis}}"
+                                                          ToolTip="勾选后递归扫描该目录下的所有子文件夹"
+                                                          Checked="RecursiveItem_Changed" Unchecked="RecursiveItem_Changed" />
+                                                <Button Grid.Column="3" Content="移除" Padding="6,0" Margin="8,0,0,0"
                                                         VerticalAlignment="Center"
                                                         Visibility="{Binding Removable, Converter={StaticResource BoolToVis}}"
                                                         Click="RemoveRow_Click" />
@@ -357,6 +365,38 @@
                 </ListView>
                 <TextBlock Grid.Row="1" x:Name="EmptyHint" Text="没有字体支持这些字符" FontSize="16" Foreground="#999"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+
+                <!-- 忙碌覆盖层：扫描字体 / 分析字形期间显示在列表中央，避免"卡住"错觉 -->
+                <Grid x:Name="LoadingOverlay" Grid.Row="1" Background="#D9FFFFFF" Visibility="Collapsed">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <!-- 转圈：整块 Grid 绕自身中心旋转（背景圆环旋转不可见，只有圆弧在动）；
+                             Viewbox 把 100x100 的内部坐标等比缩放到 46 -->
+                        <Viewbox Width="46" Height="46" Stretch="Uniform">
+                            <Grid Width="100" Height="100" RenderTransformOrigin="0.5,0.5">
+                                <Grid.RenderTransform>
+                                    <RotateTransform />
+                                </Grid.RenderTransform>
+                                <Grid.Triggers>
+                                    <EventTrigger RoutedEvent="Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation
+                                                    Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                    From="0" To="360" Duration="0:0:0.9" RepeatBehavior="Forever" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Grid.Triggers>
+                                <Ellipse Width="100" Height="100" Stroke="#E0E0E0" StrokeThickness="10" />
+                                <Path Stroke="#1976D2" StrokeThickness="10"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M 50,5 A 45,45 0 0 1 95,50" />
+                            </Grid>
+                        </Viewbox>
+                        <TextBlock x:Name="LoadingText" Text="正在处理…" FontSize="14" Foreground="#555"
+                                   Margin="0,14,0,0" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
             </Grid>
 
             <GridSplitter x:Name="PaneSplitter" Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
