@@ -424,6 +424,7 @@ public partial class MainWindow : Window
         _scanning = true;
         QueryButton.IsEnabled = false;
         RescanButton.IsEnabled = false;
+        StatsButton.IsEnabled = false; // 扫描会改变字体库，旧统计已失效
         ScopeToggle.IsEnabled = false; // 扫描期间禁用范围下拉，避免并发重扫
         StatusText.Text = "正在扫描字体…";
         ShowLoading("正在扫描字体…");
@@ -681,6 +682,7 @@ public partial class MainWindow : Window
         var cps = GlyphPreviewHelper.CodePointsOf(InputBox.Text).ToList();
         var text = InputBox.Text;
 
+        StatsButton.IsEnabled = false; // 查询期间结果未定，统计不可用（结束时由 ApplyFilter 复位）
         var matched = _scanner.Faces.Where(f => f.Covers(cps)).ToList();
 
         // 占坑探测：字形度量很快，但上万字体时加载字体文件本身耗时，大结果集并行跑
@@ -757,6 +759,20 @@ public partial class MainWindow : Window
             : StatusText.Text; // 无查询词时保留"就绪 · 共 N 个字体 face"等状态，不被命中数覆盖
 
         if (rows.Count > 0) ResultList.SelectedIndex = 0;
+
+        // 统计按钮：查询完成且有命中才可用；扫描中 / 查询中一律禁用（结果尚未成型）
+        StatsButton.IsEnabled = _allRows.Count > 0 && !_scanning && !_querying;
+    }
+
+    // ---------- 查询结果统计 ----------
+
+    // 统计口径为 _allRows（本次查询的完整结果），不受下方二次过滤框影响。
+    // 窗口是模态的，打开期间用户无法改查询，因此快照不会过期。
+    void Stats_Click(object sender, RoutedEventArgs e)
+    {
+        if (_allRows.Count == 0) return;
+        var model = StatsModel.Build(_allRows, InputBox.Text);
+        new StatsWindow(model) { Owner = this }.ShowDialog();
     }
 
     // 各排序键：字重按数值，其余按字符串
@@ -977,7 +993,8 @@ public partial class MainWindow : Window
         OpenInShell(Path.GetDirectoryName(filePath));
     }
 
-    static void OpenInShell(string? path)
+    // internal：统计窗口双击目录行时也走这里（目录而非文件，故不用 SelectInExplorer）
+    internal static void OpenInShell(string? path)
     {
         if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
         try

@@ -246,14 +246,18 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" /> <!-- 透明填充块：吃掉两按钮之间的所有空白 -->
+                        <ColumnDefinition Width="Auto" /> <!-- 统计 -->
                         <ColumnDefinition Width="Auto" /> <!-- 关于 -->
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="RescanButton" Content="重新扫描" Padding="8,2" Click="Rescan_Click" />
                     <Border Grid.Column="1" Background="Transparent" IsHitTestVisible="False" />
-                    <Button x:Name="AboutButton" Grid.Column="2" Content="关于" Padding="8,2"
+                    <Button x:Name="StatsButton" Grid.Column="2" Content="统计…" Padding="8,2"
+                            Margin="6,0,0,0" IsEnabled="False" Click="Stats_Click"
+                            ToolTip="统计本次查询命中的字体分布（来源 / 文件夹 / 格式 / 占坑）" />
+                    <Button x:Name="AboutButton" Grid.Column="3" Content="关于" Padding="8,2"
                             Margin="6,0,0,0" Click="About_Click" />
-                    <Button x:Name="TogglePaneButton" Grid.Column="3" Content="隐藏预览" Padding="8,2"
+                    <Button x:Name="TogglePaneButton" Grid.Column="4" Content="隐藏预览" Padding="8,2"
                             Margin="6,0,0,0" Click="TogglePane_Click" />
                 </Grid>
             </DockPanel>
